@@ -11,10 +11,29 @@ jobs:
     environment: production
 
     steps:
-      - name: Checkout
+      # ── Checkouts independientes ─────────────────────────────────────────────
+      - name: Checkout vps (gateway + infra)
         uses: actions/checkout@v4
+        with:
+          path: vps
 
-      # rsync maneja exclusiones anidadas (vivia/target/) que scp-action no soporta bien
+      - name: Checkout vivia
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/vivia
+          token: ${{ secrets.GH_PAT }}
+          ref: main
+          path: vps/vivia
+
+      - name: Checkout vivia-ai
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/vivia-ai
+          token: ${{ secrets.GH_PAT }}
+          ref: main
+          path: vps/vivia-ai
+
+      # ── SSH ──────────────────────────────────────────────────────────────────
       - name: Configurar SSH
         run: |
           mkdir -p ~/.ssh
@@ -22,8 +41,8 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
 
-      # Docker puede dejar archivos/dirs con dueño root (ej. bind mounts de postgres init.sql).
-      # Sin esto, rsync --delete falla con "Permission denied" al intentar eliminarlos.
+      # Docker puede dejar archivos con dueño root (ej. bind mounts de postgres).
+      # Sin esto, rsync --delete falla con "Permission denied".
       - name: Corregir permisos en servidor
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -38,13 +57,14 @@ jobs:
         run: |
           rsync -az --delete \
             --exclude='.git/' \
-            --exclude='vivia/target/' \
-            --exclude='vivia-ai/.venv/' \
-            --exclude='vivia-ai/notebooks/' \
+            --exclude='vps/vivia/target/' \
+            --exclude='vps/vivia-ai/.venv/' \
+            --exclude='vps/vivia-ai/notebooks/' \
             --exclude='**/__pycache__/' \
             -e "ssh -i ~/.ssh/deploy_key" \
-            ./ "${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }}:~/vps/"
+            vps/ "${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }}:~/vps/"
 
+      # ── Deploy ───────────────────────────────────────────────────────────────
       - name: Desplegar servicios
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -58,7 +78,6 @@ jobs:
             docker network create vivia_network 2>/dev/null || true
 
             # ── 1. Infraestructura (postgres, redis, rabbitmq) ───────────────
-            # up -d no reinicia contenedores que ya están corriendo y sanos
             cat > ~/vps/infra/.env << EOF
             RABBITMQ_USER=${{ secrets.RABBITMQ_USER }}
             RABBITMQ_PASSWORD=${{ secrets.RABBITMQ_PASSWORD }}
@@ -72,33 +91,25 @@ jobs:
             cd ~/vps/infra
             docker compose -f docker-compose.infra.yml up -d
 
-            # ── 2. Gateway (nginx + SSL) ────────────────────────────────────
-            # Si el certificado no existe todavía (primera ejecución), lo obtiene
-            # con certbot standalone antes de arrancar nginx con HTTPS.
-            CERT_EXISTS=$(docker run --rm -v certbot-etc:/etc/letsencrypt alpine \
-              sh -c "test -f /etc/letsencrypt/live/vivia.aleosh.online/fullchain.pem && echo yes || echo no")
+            # ── 2. Gateway (nginx + SSL) ─────────────────────────────────────
+            docker stop vivia-nginx 2>/dev/null || true
+            docker rm   vivia-nginx 2>/dev/null || true
 
-            if [ "$CERT_EXISTS" = "no" ]; then
-              echo "==> Certificado SSL no encontrado. Obteniendo de Let's Encrypt..."
-              docker stop vivia-nginx 2>/dev/null || true
-              docker rm   vivia-nginx 2>/dev/null || true
-              docker run --rm \
-                -p 80:80 \
-                -v certbot-etc:/etc/letsencrypt \
-                -v certbot-www:/var/www/certbot \
-                certbot/certbot certonly \
-                  --standalone \
-                  --non-interactive \
-                  -d vivia.aleosh.online \
-                  --email spartanthealexvro@gmail.com \
-                  --agree-tos \
-                  --no-eff-email
-              echo "==> Certificado obtenido."
-            fi
+            docker run --rm \
+              -p 80:80 \
+              -v certbot-etc:/etc/letsencrypt \
+              -v certbot-www:/var/www/certbot \
+              certbot/certbot certonly \
+                --standalone \
+                --keep-until-expiring \
+                --non-interactive \
+                -d vivia.aleosh.online \
+                --email spartanthealexvro@gmail.com \
+                --agree-tos \
+                --no-eff-email
 
             cd ~/vps/gateway
             docker compose -f docker-compose.gateway.yml up -d
-            # Recarga configuración nginx sin cortar conexiones activas
             docker exec vivia-nginx nginx -s reload 2>/dev/null || true
 
             # ── 3. vivia (Spring Boot) ───────────────────────────────────────

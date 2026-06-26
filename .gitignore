@@ -1,7 +1,11 @@
 # Claude / CodeGraph (herramientas locales)
 .claude
 .codegraph
-docsBien 
+
+# Repos de servicios — se descargan en CI vía actions/checkout independientes
+vivia/
+vivia-ai/
+
 
 # Compilados Java
 vivia/target/
