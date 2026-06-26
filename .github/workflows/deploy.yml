@@ -1,0 +1,120 @@
+name: Deploy VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # rsync maneja exclusiones anidadas (vivia/target/) que scp-action no soporta bien
+      - name: Configurar SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Sincronizar archivos al servidor
+        run: |
+          rsync -az --delete \
+            --exclude='.git/' \
+            --exclude='vivia/target/' \
+            --exclude='vivia-ai/.venv/' \
+            --exclude='vivia-ai/notebooks/' \
+            --exclude='**/__pycache__/' \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            ./ "${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }}:~/vps/"
+
+      - name: Desplegar servicios
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+
+            # ── Red Docker compartida ────────────────────────────────────────
+            docker network create vivia_network 2>/dev/null || true
+
+            # ── 1. Infraestructura (postgres, redis, rabbitmq) ───────────────
+            # up -d no reinicia contenedores que ya están corriendo y sanos
+            cat > ~/vps/infra/.env << EOF
+            RABBITMQ_USER=${{ secrets.RABBITMQ_USER }}
+            RABBITMQ_PASSWORD=${{ secrets.RABBITMQ_PASSWORD }}
+            RABBITMQ_VHOST=${{ secrets.RABBITMQ_VHOST }}
+            DB_NAME=${{ secrets.DB_NAME }}
+            DB_USER=${{ secrets.DB_USER }}
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
+            EOF
+
+            cd ~/vps/infra
+            docker compose -f docker-compose.infra.yml up -d
+
+            # ── 2. Gateway (nginx) ───────────────────────────────────────────
+            cd ~/vps/gateway
+            docker compose -f docker-compose.gateway.yml up -d
+            # Recarga nginx.conf sin cortar conexiones activas
+            docker exec vivia-nginx nginx -s reload 2>/dev/null || true
+
+            # ── 3. vivia (Spring Boot) ───────────────────────────────────────
+            cat > ~/vps/vivia/.env << EOF
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            DB_NAME=${{ secrets.DB_NAME }}
+            DB_USER=${{ secrets.DB_USER }}
+            SERVER_PORT=${{ secrets.SERVER_PORT }}
+            GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+            REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
+            RABBITMQ_USER=${{ secrets.RABBITMQ_USER }}
+            RABBITMQ_PASSWORD=${{ secrets.RABBITMQ_PASSWORD }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            JWT_EXPIRATION=${{ secrets.JWT_EXPIRATION }}
+            JWT_REFRESH_EXPIRATION=${{ secrets.JWT_REFRESH_EXPIRATION }}
+            INTERNAL_API_KEY=${{ secrets.INTERNAL_API_KEY }}
+            FIREBASE_ENABLED=${{ secrets.FIREBASE_ENABLED }}
+            FIREBASE_KEY_PATH=${{ secrets.FIREBASE_KEY_PATH }}
+            AWS_REGION=${{ secrets.AWS_REGION }}
+            AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+            AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            AWS_S3_BUCKET=${{ secrets.AWS_S3_BUCKET }}
+            AWS_SNS_REKOGNITION_ROLE_ARN=${{ secrets.AWS_SNS_REKOGNITION_ROLE_ARN }}
+            AWS_REKOGNITION_SNS_TOPIC_ARN=${{ secrets.AWS_REKOGNITION_SNS_TOPIC_ARN }}
+            EOF
+
+            cd ~/vps/vivia
+            docker compose down --remove-orphans
+            docker compose build --no-cache
+            docker compose up -d --wait
+            docker image prune -f
+
+            # ── 4. vivia-ai (Python AI) ──────────────────────────────────────
+            cat > ~/vps/vivia-ai/.env << EOF
+            RABBITMQ_HOST=vivia-rabbitmq
+            RABBITMQ_PORT=5672
+            RABBITMQ_USER=${{ secrets.RABBITMQ_USER }}
+            RABBITMQ_PASSWORD=${{ secrets.RABBITMQ_PASSWORD }}
+            RABBITMQ_VHOST=${{ secrets.RABBITMQ_VHOST }}
+            INTERNAL_API_KEY=${{ secrets.INTERNAL_API_KEY }}
+            EXTERNAL_SERVICE_URL=http://vivia-nginx
+            MLFLOW_ARTIFACT_ROOT=${{ secrets.MLFLOW_ARTIFACT_ROOT }}
+            EOF
+
+            cd ~/vps/vivia-ai
+            docker compose down --remove-orphans
+            docker compose build --no-cache
+            docker compose up -d
+            docker image prune -f
+
+            # ── Verificación ─────────────────────────────────────────────────
+            echo ""
+            echo "=== Contenedores activos ==="
+            docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"

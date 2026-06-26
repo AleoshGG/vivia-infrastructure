@@ -1,0 +1,26 @@
+# Claude / CodeGraph (herramientas locales)
+.claude
+.codegraph
+docsBien 
+
+# Compilados Java
+vivia/target/
+
+# Python
+vivia-ai/.venv/
+vivia-ai/__pycache__/
+**/__pycache__/
+vivia-ai/notebooks/
+
+# .env locales (se generan en el servidor por el workflow)
+vivia/.env
+vivia-ai/.env
+infra/.env
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# Firebase credentials — nunca commitear
+vivia/firebase-adminsdk*.json

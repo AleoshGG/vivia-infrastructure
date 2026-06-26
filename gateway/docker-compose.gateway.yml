@@ -1,0 +1,35 @@
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: vivia-nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - certbot-www:/var/www/certbot:ro
+      - certbot-etc:/etc/letsencrypt:ro
+    networks:
+      - vivia_network
+
+  certbot:
+    image: certbot/certbot
+    container_name: vivia-certbot
+    restart: unless-stopped
+    volumes:
+      - certbot-www:/var/www/certbot
+      - certbot-etc:/etc/letsencrypt
+    # Intenta renovar el certificado cada 12h; Let's Encrypt lo renueva cuando faltan < 30 días
+    entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew --quiet; sleep 12h & wait $${!}; done"
+
+volumes:
+  # name: explícito para que init-ssl.sh y compose usen el mismo volumen Docker
+  certbot-www:
+    name: certbot-www
+  certbot-etc:
+    name: certbot-etc
+
+networks:
+  vivia_network:
+    external: true
