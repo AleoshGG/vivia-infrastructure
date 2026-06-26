@@ -72,10 +72,33 @@ jobs:
             cd ~/vps/infra
             docker compose -f docker-compose.infra.yml up -d
 
-            # ── 2. Gateway (nginx) ───────────────────────────────────────────
+            # ── 2. Gateway (nginx + SSL) ────────────────────────────────────
+            # Si el certificado no existe todavía (primera ejecución), lo obtiene
+            # con certbot standalone antes de arrancar nginx con HTTPS.
+            CERT_EXISTS=$(docker run --rm -v certbot-etc:/etc/letsencrypt alpine \
+              sh -c "test -f /etc/letsencrypt/live/vivia.aleosh.online/fullchain.pem && echo yes || echo no")
+
+            if [ "$CERT_EXISTS" = "no" ]; then
+              echo "==> Certificado SSL no encontrado. Obteniendo de Let's Encrypt..."
+              docker stop vivia-nginx 2>/dev/null || true
+              docker rm   vivia-nginx 2>/dev/null || true
+              docker run --rm \
+                -p 80:80 \
+                -v certbot-etc:/etc/letsencrypt \
+                -v certbot-www:/var/www/certbot \
+                certbot/certbot certonly \
+                  --standalone \
+                  --non-interactive \
+                  -d vivia.aleosh.online \
+                  --email spartanthealexvro@gmail.com \
+                  --agree-tos \
+                  --no-eff-email
+              echo "==> Certificado obtenido."
+            fi
+
             cd ~/vps/gateway
             docker compose -f docker-compose.gateway.yml up -d
-            # Recarga nginx.conf sin cortar conexiones activas
+            # Recarga configuración nginx sin cortar conexiones activas
             docker exec vivia-nginx nginx -s reload 2>/dev/null || true
 
             # ── 3. vivia (Spring Boot) ───────────────────────────────────────
