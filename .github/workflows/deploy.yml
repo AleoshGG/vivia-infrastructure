@@ -22,6 +22,18 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
 
+      # Docker puede dejar archivos/dirs con dueño root (ej. bind mounts de postgres init.sql).
+      # Sin esto, rsync --delete falla con "Permission denied" al intentar eliminarlos.
+      - name: Corregir permisos en servidor
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            mkdir -p ~/vps
+            sudo chown -R $(whoami):$(whoami) ~/vps/ 2>/dev/null || true
+
       - name: Sincronizar archivos al servidor
         run: |
           rsync -az --delete \
