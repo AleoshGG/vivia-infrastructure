@@ -77,47 +77,25 @@ jobs:
             # ── Red Docker compartida ────────────────────────────────────────
             docker network create vivia_network 2>/dev/null || true
 
-            # ── 1. Infraestructura (postgres, redis, rabbitmq) ───────────────
+            # ── 1. Infraestructura (redis, rabbitmq) ─────────────────────────
+            # PostgreSQL ya no vive en Docker: ambas bases son instancias RDS.
             cat > ~/vps/infra/.env << EOF
             RABBITMQ_USER=${{ secrets.RABBITMQ_USER }}
             RABBITMQ_PASSWORD=${{ secrets.RABBITMQ_PASSWORD }}
             RABBITMQ_VHOST=${{ secrets.RABBITMQ_VHOST }}
-            DB_NAME=${{ secrets.DB_NAME }}
-            DB_USER=${{ secrets.DB_USER }}
-            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
             REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
             EOF
 
             cd ~/vps/infra
             docker compose -f docker-compose.infra.yml up -d
 
-            # ── 2. Gateway (nginx + SSL) ─────────────────────────────────────
-            docker stop vivia-nginx 2>/dev/null || true
-            docker rm   vivia-nginx 2>/dev/null || true
-
-            docker run --rm \
-              -p 80:80 \
-              -v certbot-etc:/etc/letsencrypt \
-              -v certbot-www:/var/www/certbot \
-              certbot/certbot certonly \
-                --standalone \
-                --keep-until-expiring \
-                --non-interactive \
-                -d vivia.aleosh.online \
-                --email spartanthealexvro@gmail.com \
-                --agree-tos \
-                --no-eff-email
-
-            cd ~/vps/gateway
-            docker compose -f docker-compose.gateway.yml up -d
-            docker exec vivia-nginx nginx -s reload 2>/dev/null || true
-
-            # ── 3. vivia (Spring Boot) ───────────────────────────────────────
+            # ── 2. vivia (Spring Boot) ───────────────────────────────────────
             mkdir -p ~/secrets
             echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > ~/secrets/firebase-adminsdk.json
             chmod 600 ~/secrets/firebase-adminsdk.json
 
             cat > ~/vps/vivia/.env << EOF
+            DB_HOST=${{ secrets.DB_HOST }}
             DB_PASSWORD=${{ secrets.DB_PASSWORD }}
             DB_NAME=${{ secrets.DB_NAME }}
             DB_USER=${{ secrets.DB_USER }}
@@ -147,7 +125,7 @@ jobs:
             docker compose up -d --wait
             docker image prune -f
 
-            # ── 4. vivia-ai (Python AI) ──────────────────────────────────────
+            # ── 3. vivia-ai (Python AI) ──────────────────────────────────────
             # Credencial del service account de GCS (artefactos de MLflow).
             mkdir -p ~/secrets
             echo '${{ secrets.GCS_SA_JSON }}' > ~/secrets/gcs-vivia.json
@@ -167,8 +145,8 @@ jobs:
             POSTGRES_USER=${{ secrets.AI_DB_USER }}
             POSTGRES_PASSWORD=${{ secrets.AI_DB_PASSWORD }}
             POSTGRES_DB=${{ secrets.AI_DB_NAME }}
-            DATABASE_URL=postgresql+asyncpg://${{ secrets.AI_DB_USER }}:${{ secrets.AI_DB_PASSWORD }}@vivia-postgres:5432/${{ secrets.AI_DB_NAME }}
-            MLFLOW_BACKEND_STORE_URI=postgresql://${{ secrets.AI_DB_USER }}:${{ secrets.AI_DB_PASSWORD }}@vivia-postgres:5432/${{ secrets.AI_DB_NAME }}
+            DATABASE_URL=postgresql+asyncpg://${{ secrets.AI_DB_USER }}:${{ secrets.AI_DB_PASSWORD }}@${{ secrets.AI_DB_HOST }}:5432/${{ secrets.AI_DB_NAME }}?ssl=require
+            MLFLOW_BACKEND_STORE_URI=postgresql://${{ secrets.AI_DB_USER }}:${{ secrets.AI_DB_PASSWORD }}@${{ secrets.AI_DB_HOST }}:5432/${{ secrets.AI_DB_NAME }}?sslmode=require
             GCS_CREDENTIALS_HOST=/home/${{ secrets.EC2_USERNAME }}/secrets/gcs-vivia.json
             EOF
 
@@ -176,12 +154,36 @@ jobs:
             docker compose down --remove-orphans
             docker compose build --no-cache
 
-            # Arranque escalonado: las dependencias primero, luego registramos el
-            # modelo en MLflow (idempotente) y por último levantamos anomaly-api.
-            docker compose up -d postgres mlflow
+            # Arranque escalonado: MLflow primero (la BD ya es RDS, externa),
+            # registramos el modelo (idempotente) y por último levantamos todo.
+            docker compose up -d mlflow
             docker compose run --rm anomaly-api python -m scripts.register_anomaly_model
             docker compose up -d
             docker image prune -f
+
+            # ── 4. Gateway (nginx + SSL) — AL FINAL ──────────────────────────
+            # NGINX resuelve los upstream (vivia-app, vivia-anomaly-api, ...) al
+            # arrancar; si esos contenedores no existen, falla. Por eso el gateway
+            # se levanta DESPUÉS de que vivia y vivia-ai ya estén arriba.
+            docker stop vivia-nginx 2>/dev/null || true
+            docker rm   vivia-nginx 2>/dev/null || true
+
+            docker run --rm \
+              -p 80:80 \
+              -v certbot-etc:/etc/letsencrypt \
+              -v certbot-www:/var/www/certbot \
+              certbot/certbot certonly \
+                --standalone \
+                --keep-until-expiring \
+                --non-interactive \
+                -d vivia.aleosh.online \
+                --email spartanthealexvro@gmail.com \
+                --agree-tos \
+                --no-eff-email
+
+            cd ~/vps/gateway
+            docker compose -f docker-compose.gateway.yml up -d
+            docker exec vivia-nginx nginx -s reload 2>/dev/null || true
 
             # ── Verificación ─────────────────────────────────────────────────
             echo ""
