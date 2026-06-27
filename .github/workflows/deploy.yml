@@ -157,6 +157,7 @@ jobs:
             INTERNAL_API_KEY=${{ secrets.INTERNAL_API_KEY }}
             EXTERNAL_SERVICE_URL=http://vivia-app:8080
             MLFLOW_ARTIFACT_ROOT=${{ secrets.MLFLOW_ARTIFACT_ROOT }}
+            MODELS_REGISTRY_HOST=${{ secrets.MODELS_REGISTRY_HOST }}
             EOF
 
             cd ~/vps/vivia-ai
