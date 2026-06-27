@@ -150,7 +150,7 @@ jobs:
             RABBITMQ_PASSWORD=${{ secrets.RABBITMQ_PASSWORD }}
             RABBITMQ_VHOST=${{ secrets.RABBITMQ_VHOST }}
             INTERNAL_API_KEY=${{ secrets.INTERNAL_API_KEY }}
-            EXTERNAL_SERVICE_URL=http://vivia-nginx
+            EXTERNAL_SERVICE_URL=http://vivia-app:8080
             MLFLOW_ARTIFACT_ROOT=${{ secrets.MLFLOW_ARTIFACT_ROOT }}
             EOF
 
