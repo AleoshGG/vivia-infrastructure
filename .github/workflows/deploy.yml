@@ -148,6 +148,11 @@ jobs:
             docker image prune -f
 
             # ── 4. vivia-ai (Python AI) ──────────────────────────────────────
+            # Credencial del service account de GCS (artefactos de MLflow).
+            mkdir -p ~/secrets
+            echo '${{ secrets.GCS_SA_JSON }}' > ~/secrets/gcs-vivia.json
+            chmod 600 ~/secrets/gcs-vivia.json
+
             cat > ~/vps/vivia-ai/.env << EOF
             RABBITMQ_HOST=vivia-rabbitmq
             RABBITMQ_PORT=5672
@@ -158,11 +163,23 @@ jobs:
             EXTERNAL_SERVICE_URL=http://vivia-app:8080
             MLFLOW_ARTIFACT_ROOT=${{ secrets.MLFLOW_ARTIFACT_ROOT }}
             MODELS_REGISTRY_HOST=${{ secrets.MODELS_REGISTRY_HOST }}
+            MLFLOW_TRACKING_URI=http://mlflow:5000
+            POSTGRES_USER=${{ secrets.AI_DB_USER }}
+            POSTGRES_PASSWORD=${{ secrets.AI_DB_PASSWORD }}
+            POSTGRES_DB=${{ secrets.AI_DB_NAME }}
+            DATABASE_URL=postgresql+asyncpg://${{ secrets.AI_DB_USER }}:${{ secrets.AI_DB_PASSWORD }}@vivia-postgres:5432/${{ secrets.AI_DB_NAME }}
+            MLFLOW_BACKEND_STORE_URI=postgresql://${{ secrets.AI_DB_USER }}:${{ secrets.AI_DB_PASSWORD }}@vivia-postgres:5432/${{ secrets.AI_DB_NAME }}
+            GCS_CREDENTIALS_HOST=/home/${{ secrets.EC2_USERNAME }}/secrets/gcs-vivia.json
             EOF
 
             cd ~/vps/vivia-ai
             docker compose down --remove-orphans
             docker compose build --no-cache
+
+            # Arranque escalonado: las dependencias primero, luego registramos el
+            # modelo en MLflow (idempotente) y por último levantamos anomaly-api.
+            docker compose up -d postgres mlflow
+            docker compose run --rm anomaly-api python -m scripts.register_anomaly_model
             docker compose up -d
             docker image prune -f
 
