@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@source "./App.tsx";
+@source "./main.tsx";
+@source "./features/auth/presentation/pages/LoginPage.tsx";
+@source "./features/auth/presentation/components/LoginForm.tsx";
+
+@theme {
+  --font-poppins: 'Poppins', sans-serif;
+  --color-vivia-dark: #04364a;
+  --color-vivia-mid: #176b87;
+  --color-vivia-teal: #64ccc5;
+}
