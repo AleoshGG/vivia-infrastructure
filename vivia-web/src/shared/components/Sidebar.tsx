@@ -1,15 +1,18 @@
+import { useNavigate } from 'react-router-dom';
+
 export type NavItem = 'dashboard' | 'users' | 'reports' | 'identity' | 'settings';
 
 interface NavItemConfig {
   id: NavItem;
   label: string;
+  path?: string;
 }
 
 const NAV_ITEMS: NavItemConfig[] = [
   { id: 'dashboard', label: 'Panel de Control' },
   { id: 'users', label: 'Usuarios' },
-  { id: 'reports', label: 'Reportes' },
-  { id: 'identity', label: 'Verificación de Identidad' },
+  { id: 'reports', label: 'Reportes', path: '/reports' },
+  { id: 'identity', label: 'Verificación de Identidad', path: '/identity' },
   { id: 'settings', label: 'Configuración' },
 ];
 
@@ -22,7 +25,13 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activeItem, onNavigate, onLogout, userName = 'Admin', userRole = 'Administrador' }: SidebarProps) {
+  const navigate = useNavigate();
   const initial = userName.charAt(0).toUpperCase();
+
+  const handleNavigate = (item: NavItemConfig) => {
+    onNavigate?.(item.id);
+    if (item.path) navigate(item.path);
+  };
 
   return (
     <aside className="fixed left-0 top-0 h-screen w-[240px] bg-vivia-dark overflow-hidden flex flex-col z-10">
@@ -46,7 +55,7 @@ export function Sidebar({ activeItem, onNavigate, onLogout, userName = 'Admin', 
           return (
             <button
               key={item.id}
-              onClick={() => onNavigate?.(item.id)}
+              onClick={() => handleNavigate(item)}
               className={`relative flex items-center h-[44px] w-full rounded-[8px] px-[36px] text-left transition-colors cursor-pointer ${
                 isActive ? 'bg-white/15' : 'hover:bg-white/10'
               }`}

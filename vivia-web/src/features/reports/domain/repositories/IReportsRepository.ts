@@ -7,8 +7,4 @@ export interface IReportsRepository {
   getReportDetail(id: string): Promise<ReportDetail>;
   getLessorReportHistory(lessorId: string): Promise<ReportPresentation[]>;
   applyVerdict(id: string, verdict: ReportVerdict): Promise<void>;
-  subscribeToNewReports(
-    onNew: (report: ReportPresentation) => void,
-    onError?: (e: Error) => void,
-  ): () => void;
 }

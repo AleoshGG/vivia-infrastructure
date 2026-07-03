@@ -3,6 +3,8 @@ import { LoginPage } from './features/auth/presentation/pages/LoginPage';
 import { useLogout } from './features/auth/presentation/hooks/useLogout';
 import { ReportsPage } from './features/reports/presentation/pages/ReportsPage';
 import { ReportDetailsPage } from './features/reports/presentation/pages/ReportDetailsPage';
+import { VerificationsPage } from './features/verifications/presentation/pages/VerificationsPage';
+import { VerificationDetailPage } from './features/verifications/presentation/pages/VerificationDetailPage';
 import { ProtectedRoute } from './shared/components/ProtectedRoute';
 
 function AppRoutes() {
@@ -14,6 +16,8 @@ function AppRoutes() {
       <Route element={<ProtectedRoute />}>
         <Route path="/reports" element={<ReportsPage onLogout={logout} />} />
         <Route path="/reports/:id" element={<ReportDetailsPage onLogout={logout} />} />
+        <Route path="/identity" element={<VerificationsPage onLogout={logout} />} />
+        <Route path="/identity/:id" element={<VerificationDetailPage onLogout={logout} />} />
       </Route>
       <Route path="*" element={<Navigate to="/reports" replace />} />
     </Routes>

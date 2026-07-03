@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sidebar } from '@/shared/components/Sidebar';
 import { TopBar } from '@/shared/components/TopBar';
@@ -6,8 +6,6 @@ import { Pagination } from '@/shared/components/Pagination';
 import { FilterBar, type PriorityFilter } from '../components/FilterBar';
 import { ReportTable } from '../components/ReportTable';
 import { useReports } from '../hooks/useReports';
-import { useReportStream } from '../hooks/useReportStream';
-import type { ReportPresentation } from '../../domain/entities/ReportPresentation';
 
 const PAGE_SIZE = 7;
 
@@ -19,21 +17,11 @@ export function ReportsPage({ onLogout }: ReportsPageProps) {
   const navigate = useNavigate();
   const { reports, loading, error } = useReports();
 
-  const [liveReports, setLiveReports] = useState<ReportPresentation[]>([]);
-  const { status: streamStatus } = useReportStream(
-    useCallback((newReport: ReportPresentation) => {
-      setLiveReports((prev) => [newReport, ...prev]);
-    }, []),
-  );
-
   const [activePriority, setActivePriority] = useState<PriorityFilter>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Los reportes en vivo se anteponen a los cargados inicialmente
-  const allReports = [...liveReports, ...reports];
-
-  const filtered = allReports.filter((r) => {
+  const filtered = reports.filter((r) => {
     if (activePriority && r.reason.priority !== activePriority) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
@@ -64,14 +52,6 @@ export function ReportsPage({ onLogout }: ReportsPageProps) {
           onPriorityChange={(p) => { setActivePriority(p); setCurrentPage(1); }}
           onSearchChange={(q) => { setSearchQuery(q); setCurrentPage(1); }}
         />
-
-        {streamStatus === 'error' && (
-          <div className="mx-6 mt-3 px-4 py-2 rounded-lg bg-[rgba(239,73,73,0.08)] border border-[rgba(239,73,73,0.2)]">
-            <p className="font-poppins text-[11px] text-[#ef4949]">
-              ⚠ Sin conexión en tiempo real. Los nuevos reportes no se actualizarán automáticamente.
-            </p>
-          </div>
-        )}
 
         <div className="px-6 py-4 flex-1">
           {loading && (

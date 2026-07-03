@@ -18,6 +18,13 @@
 @source "./features/reports/presentation/components/PropertySnapshotSection.tsx";
 @source "./features/reports/presentation/components/ResolutionPanel.tsx";
 @source "./features/reports/presentation/components/PublicationPreview.tsx";
+@source "./features/verifications/presentation/components/VerificationTabs.tsx";
+@source "./features/verifications/presentation/components/VerificationTable.tsx";
+@source "./features/verifications/presentation/components/DocumentsCard.tsx";
+@source "./features/verifications/presentation/components/UserDataCard.tsx";
+@source "./features/verifications/presentation/components/DecisionCard.tsx";
+@source "./features/verifications/presentation/pages/VerificationsPage.tsx";
+@source "./features/verifications/presentation/pages/VerificationDetailPage.tsx";
 
 @theme {
   --font-poppins: 'Poppins', sans-serif;

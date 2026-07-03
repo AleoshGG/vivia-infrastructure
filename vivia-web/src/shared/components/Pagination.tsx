@@ -4,9 +4,10 @@ interface PaginationProps {
   totalItems: number;
   pageSize: number;
   onPageChange: (page: number) => void;
+  itemLabel?: string;
 }
 
-export function Pagination({ currentPage, totalPages, totalItems, pageSize, onPageChange }: PaginationProps) {
+export function Pagination({ currentPage, totalPages, totalItems, pageSize, onPageChange, itemLabel = 'reportes' }: PaginationProps) {
   const showing = Math.min(pageSize * currentPage, totalItems);
 
   const pages = Array.from({ length: Math.min(totalPages, 5) }, (_, i) => i + 1);
@@ -14,7 +15,7 @@ export function Pagination({ currentPage, totalPages, totalItems, pageSize, onPa
   return (
     <div className="flex items-center justify-between py-4 px-6">
       <p className="text-[12px] font-poppins text-[#6f7e88]">
-        Mostrando {showing} de {totalItems} reportes
+        Mostrando {showing} de {totalItems} {itemLabel}
       </p>
       <div className="flex items-center gap-1">
         {pages.map((page) => (

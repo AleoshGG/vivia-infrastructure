@@ -3,7 +3,11 @@ import type { ReportPresentation } from '../entities/ReportPresentation';
 import { ReportsException } from '../exceptions/ReportsException';
 
 export class GetReportsUseCase {
-  constructor(private readonly repo: IReportsRepository) {}
+  private readonly repo: IReportsRepository;
+
+  constructor(repo: IReportsRepository) {
+    this.repo = repo;
+  }
 
   async execute(): Promise<ReportPresentation[]> {
     try {
@@ -12,12 +16,5 @@ export class GetReportsUseCase {
       if (error instanceof ReportsException) throw error;
       throw new ReportsException('No se pudieron cargar los reportes. Intenta de nuevo.');
     }
-  }
-
-  subscribeToNewReports(
-    onNew: (report: ReportPresentation) => void,
-    onError?: (e: Error) => void,
-  ): () => void {
-    return this.repo.subscribeToNewReports(onNew, onError);
   }
 }
