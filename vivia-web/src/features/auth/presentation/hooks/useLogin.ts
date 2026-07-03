@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { loginUseCase } from '../../data/di';
 import { sessionManager } from '@/core/session';
+import { fcmSubscriptionService } from '@/core/notifications';
 import { AuthException } from '../../domain/exceptions/AuthException';
 
 export function useLogin() {
@@ -15,6 +16,7 @@ export function useLogin() {
     try {
       const session = await loginUseCase.execute(identifier, password);
       sessionManager.saveSession(session.accessToken, session.refreshToken);
+      void fcmSubscriptionService.subscribeAfterLogin();
       setSuccess(true);
     } catch (e) {
       if (e instanceof AuthException) {

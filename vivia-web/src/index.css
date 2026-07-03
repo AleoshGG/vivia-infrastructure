@@ -4,6 +4,15 @@
 @source "./main.tsx";
 @source "./features/auth/presentation/pages/LoginPage.tsx";
 @source "./features/auth/presentation/components/LoginForm.tsx";
+@source "./shared/components/Badge.tsx";
+@source "./shared/components/Table.tsx";
+@source "./shared/components/Pagination.tsx";
+@source "./shared/components/Sidebar.tsx";
+@source "./shared/components/TopBar.tsx";
+@source "./features/reports/presentation/components/StatCard.tsx";
+@source "./features/reports/presentation/components/FilterBar.tsx";
+@source "./features/reports/presentation/components/ReportTable.tsx";
+@source "./features/reports/presentation/pages/ReportsPage.tsx";
 
 @theme {
   --font-poppins: 'Poppins', sans-serif;

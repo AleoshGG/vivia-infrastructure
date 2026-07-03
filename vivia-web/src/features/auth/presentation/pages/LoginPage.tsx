@@ -1,8 +1,15 @@
+import { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { LoginForm } from '../components/LoginForm';
 import { useLogin } from '../hooks/useLogin';
 
 export function LoginPage() {
   const { login, loading, error, success } = useLogin();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (success) navigate('/reports', { replace: true });
+  }, [success, navigate]);
 
   return (
     <div className="flex w-screen h-screen overflow-hidden">

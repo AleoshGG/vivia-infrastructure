@@ -5,6 +5,7 @@ import { loginResponseToSession } from '../mappers/loginResponseToSession';
 import type { LoginResponseDto } from '../dtos/LoginResponseDto';
 import { httpClient, HttpError } from '@/core/di';
 import { sessionManager } from '@/core/session';
+import { fcmSubscriptionService } from '@/core/notifications';
 
 export class ApiAuthRepository implements IAuthRepository {
   async login(identifier: string, password: string): Promise<Session> {
@@ -22,6 +23,8 @@ export class ApiAuthRepository implements IAuthRepository {
   }
 
   async logout(): Promise<void> {
+    // Desuscribe el token FCM mientras el access token sigue vigente.
+    await fcmSubscriptionService.unsubscribeBeforeLogout();
     // Intenta invalidar el refresh token en el servidor; limpia local siempre.
     await httpClient.post('/auth/logout', {}).catch(() => {});
     sessionManager.clearSession();
