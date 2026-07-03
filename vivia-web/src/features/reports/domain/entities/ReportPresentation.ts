@@ -7,7 +7,8 @@ export interface ReportPresentation {
   lessorName: string;
   reason: ReportReason;
   comment: string;
-  verdict: ReportVerdict;
+  /** null mientras el reporte no ha sido resuelto */
+  verdict: ReportVerdict | null;
   createdAt: string;
   resolved: boolean;
 }

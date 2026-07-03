@@ -13,6 +13,11 @@
 @source "./features/reports/presentation/components/FilterBar.tsx";
 @source "./features/reports/presentation/components/ReportTable.tsx";
 @source "./features/reports/presentation/pages/ReportsPage.tsx";
+@source "./features/reports/presentation/pages/ReportDetailsPage.tsx";
+@source "./features/reports/presentation/components/ReportDataSection.tsx";
+@source "./features/reports/presentation/components/PropertySnapshotSection.tsx";
+@source "./features/reports/presentation/components/ResolutionPanel.tsx";
+@source "./features/reports/presentation/components/PublicationPreview.tsx";
 
 @theme {
   --font-poppins: 'Poppins', sans-serif;

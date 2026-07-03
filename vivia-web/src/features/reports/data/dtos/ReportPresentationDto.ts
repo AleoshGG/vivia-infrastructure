@@ -12,7 +12,7 @@ export interface ReportPresentationDto {
   lessorName: string;
   reason: ReportReasonDto;
   comment: string;
-  verdict: ReportVerdict;
+  verdict: ReportVerdict | null;
   createdAt: string;
   resolved: boolean;
 }

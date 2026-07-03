@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Sidebar } from '@/shared/components/Sidebar';
 import { TopBar } from '@/shared/components/TopBar';
 import { Pagination } from '@/shared/components/Pagination';
@@ -15,6 +16,7 @@ interface ReportsPageProps {
 }
 
 export function ReportsPage({ onLogout }: ReportsPageProps) {
+  const navigate = useNavigate();
   const { reports, loading, error } = useReports();
 
   const [liveReports, setLiveReports] = useState<ReportPresentation[]>([]);
@@ -88,8 +90,8 @@ export function ReportsPage({ onLogout }: ReportsPageProps) {
             <>
               <ReportTable
                 reports={paginated}
-                onAttend={(id) => console.log('Atender', id)}
-                onViewDetail={(id) => console.log('Ver detalle', id)}
+                onAttend={(id) => navigate(`/reports/${id}`)}
+                onViewDetail={(id) => navigate(`/reports/${id}`)}
               />
               <Pagination
                 currentPage={currentPage}

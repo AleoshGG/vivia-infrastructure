@@ -8,7 +8,7 @@ export function reportDtoToPresentation(dto: ReportPresentationDto): ReportPrese
     lessorName:    dto.lessorName,
     reason:        { name: dto.reason.name, priority: dto.reason.priority },
     comment:       dto.comment,
-    verdict:       dto.verdict,
+    verdict:       dto.verdict ?? null,
     createdAt:     dto.createdAt,
     resolved:      dto.resolved,
   };

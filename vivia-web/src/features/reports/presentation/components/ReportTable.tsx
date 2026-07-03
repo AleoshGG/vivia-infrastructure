@@ -2,7 +2,7 @@ import { Table, type TableColumn } from '@/shared/components/Table';
 import { Badge } from '@/shared/components/Badge';
 import type { ReportPresentation } from '../../domain/entities/ReportPresentation';
 import type { ReportPriority }     from '../../domain/objectvalues/ReportPriority';
-import type { ReportVerdict }      from '../../domain/objectvalues/ReportVerdict';
+import { verdictBadge } from './verdictBadge';
 
 export type { ReportPresentation };
 
@@ -12,16 +12,6 @@ interface ReportTableProps {
   onViewDetail?: (reportId: string) => void;
 }
 
-const VERDICT_COLOR: Record<ReportVerdict, 'orange' | 'green' | 'gray'> = {
-  PENDING:   'orange',
-  APPROVED:  'green',
-  DISMISSED: 'gray',
-};
-const VERDICT_LABEL: Record<ReportVerdict, string> = {
-  PENDING:   'Pendiente',
-  APPROVED:  'Aprobado',
-  DISMISSED: 'Desestimado',
-};
 
 const PRIORITY_COLOR: Record<ReportPriority, 'red' | 'orange' | 'blue'> = {
   HIGH:   'red',
@@ -118,9 +108,10 @@ export function ReportTable({ reports, onAttend, onViewDetail }: ReportTableProp
       key: 'verdict',
       header: 'VEREDICTO',
       width: '130px',
-      render: (row) => (
-        <Badge label={VERDICT_LABEL[row.verdict]} color={VERDICT_COLOR[row.verdict]} />
-      ),
+      render: (row) => {
+        const badge = verdictBadge(row.resolved, row.verdict);
+        return <Badge label={badge.label} color={badge.color} />;
+      },
     },
     {
       key: 'action',
