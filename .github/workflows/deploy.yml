@@ -161,10 +161,28 @@ jobs:
             docker compose up -d
             docker image prune -f
 
-            # ── 4. Gateway (nginx + SSL) — AL FINAL ──────────────────────────
-            # NGINX resuelve los upstream (vivia-app, vivia-anomaly-api, ...) al
-            # arrancar; si esos contenedores no existen, falla. Por eso el gateway
-            # se levanta DESPUÉS de que vivia y vivia-ai ya estén arriba.
+            # ── 4. vivia-web (React SPA) ──────────────────────────────────────
+            cat > ~/vps/vivia-web/.env << EOF
+            VITE_FIREBASE_API_KEY=${{ secrets.VITE_FIREBASE_API_KEY }}
+            VITE_FIREBASE_AUTH_DOMAIN=${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+            VITE_FIREBASE_PROJECT_ID=${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+            VITE_FIREBASE_STORAGE_BUCKET=${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+            VITE_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+            VITE_FIREBASE_APP_ID=${{ secrets.VITE_FIREBASE_APP_ID }}
+            VITE_FIREBASE_MEASUREMENT_ID=${{ secrets.VITE_FIREBASE_MEASUREMENT_ID }}
+            VITE_FIREBASE_VAPID_KEY=${{ secrets.VITE_FIREBASE_VAPID_KEY }}
+            EOF
+
+            cd ~/vps/vivia-web
+            docker compose down --remove-orphans
+            docker compose build --no-cache
+            docker compose up -d --wait
+            docker image prune -f
+
+            # ── 5. Gateway (nginx + SSL) — AL FINAL ──────────────────────────
+            # NGINX resuelve los upstream (vivia-app, vivia-anomaly-api, vivia-web, ...)
+            # al arrancar; si esos contenedores no existen, falla. Por eso el gateway
+            # se levanta DESPUÉS de que vivia, vivia-ai y vivia-web ya estén arriba.
             docker stop vivia-nginx 2>/dev/null || true
             docker rm   vivia-nginx 2>/dev/null || true
 
