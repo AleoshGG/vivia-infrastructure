@@ -1,4 +1,5 @@
 import { sessionManager } from '../session';
+import { refreshTokens } from '../http';
 
 const BASE_URL = 'https://vivia.aleosh.online/api';
 
@@ -18,6 +19,7 @@ export const sseClient = {
     onError?: (e: Error) => void,
   ): SseSubscription {
     let closed = false;
+    let connected = false;
     let controller: AbortController | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectDelay = RECONNECT_INITIAL_DELAY_MS;
@@ -30,6 +32,7 @@ export const sseClient = {
 
     const connect = async () => {
       controller = new AbortController();
+      console.log(`[SSE] Conectando a ${path}...`);
 
       try {
         const token = sessionManager.getAccessToken();
@@ -44,12 +47,26 @@ export const sseClient = {
         });
 
         if (!response.ok) {
+          console.log(`[SSE] Error al conectar a ${path}: HTTP ${response.status}`);
+
+          // Token expirado: se refresca la sesión para que el siguiente
+          // intento (scheduleReconnect) use el access token nuevo
+          if (response.status === 401 || response.status === 403) {
+            try {
+              await refreshTokens();
+            } catch {
+              // refresh falló — la sesión ya no es recuperable, se sigue reintentando igual
+            }
+          }
+
           onError?.(new Error(`HTTP ${response.status}`));
           scheduleReconnect();
           return;
         }
 
         reconnectDelay = RECONNECT_INITIAL_DELAY_MS;
+        connected = true;
+        console.log(`[SSE] Conectado a ${path}`);
         onOpen?.();
 
         const reader = response.body!.getReader();
@@ -82,9 +99,12 @@ export const sseClient = {
         }
 
         // El servidor cerró el stream (deploy, timeout de nginx…): reintentar
+        connected = false;
+        if (!closed) console.log(`[SSE] Desconectado de ${path} por el servidor, reintentando`);
         scheduleReconnect();
       } catch (e) {
         if ((e as Error).name !== 'AbortError') {
+          console.log(`[SSE] Error de red en ${path}: ${(e as Error).message}`);
           onError?.(e as Error);
           scheduleReconnect();
         }
@@ -95,9 +115,16 @@ export const sseClient = {
 
     return {
       close: () => {
+        if (closed) return;
         closed = true;
         if (reconnectTimer !== null) clearTimeout(reconnectTimer);
         controller?.abort();
+        // Solo se reporta si había una conexión abierta: cerrar una suscripción
+        // que nunca conectó (StrictMode monta/desmonta en dev) no es una desconexión
+        if (connected) {
+          connected = false;
+          console.log(`[SSE] Desconectado de ${path} por el cliente`);
+        }
       },
     };
   },

@@ -22,7 +22,7 @@ interface RefreshResponseDto {
   message: string;
 }
 
-async function refreshTokens(): Promise<void> {
+export async function refreshTokens(): Promise<void> {
   const refreshToken = sessionManager.getRefreshToken();
   if (!refreshToken) {
     sessionManager.clearSession();
