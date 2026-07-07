@@ -53,6 +53,11 @@ export async function requestNotificationPermission(): Promise<string | null> {
     );
     console.info('[FCM] service worker registrado, scope:', registration.scope);
 
+    // register() resuelve con el SW aún en "installing" — PushManager.subscribe
+    // (dentro de getToken) falla si el SW no está activo todavía.
+    await navigator.serviceWorker.ready;
+    console.info('[FCM] service worker activo');
+
     const token = await getToken(messaging, {
       vapidKey: VAPID_KEY,
       serviceWorkerRegistration: registration,
