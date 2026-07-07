@@ -81,7 +81,10 @@ async function request<T>(
     throw new HttpError(response.status, errorJson.message ?? `HTTP ${response.status}`);
   }
 
-  return response.json() as Promise<T>;
+  // Algunos endpoints (p. ej. POST /admin/fcm/subscribe) responden 200/204
+  // sin cuerpo — response.json() lanzaría "Unexpected end of JSON input".
+  const text = await response.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 export const httpClient = {
