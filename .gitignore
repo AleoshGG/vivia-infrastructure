@@ -5,6 +5,7 @@
 # Repos de servicios — se descargan en CI vía actions/checkout independientes
 vivia/
 vivia-ai/
+vivia-maps/
 
 
 # Compilados Java
@@ -19,6 +20,7 @@ vivia-ai/notebooks/
 # .env locales (se generan en el servidor por el workflow)
 vivia/.env
 vivia-ai/.env
+vivia-maps/.env
 infra/.env
 
 # IDE

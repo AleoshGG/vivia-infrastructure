@@ -15,6 +15,7 @@ on:
           - infra
           - vivia
           - vivia-ai
+          - vivia-maps
           - vivia-web
           - gateway
 
@@ -61,11 +62,13 @@ jobs:
             RUN_VIVIA_WEB="${{ needs.changes.outputs.vivia_web }}"
             RUN_VIVIA="false"
             RUN_VIVIA_AI="false"
+            RUN_VIVIA_MAPS="false"
           else
-            RUN_INFRA="false"; RUN_VIVIA="false"; RUN_VIVIA_AI="false"; RUN_VIVIA_WEB="false"; RUN_GATEWAY="false"
+            RUN_INFRA="false"; RUN_VIVIA="false"; RUN_VIVIA_AI="false"; RUN_VIVIA_MAPS="false"; RUN_VIVIA_WEB="false"; RUN_GATEWAY="false"
             if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "infra" ]; then RUN_INFRA="true"; fi
             if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "vivia" ]; then RUN_VIVIA="true"; fi
             if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "vivia-ai" ]; then RUN_VIVIA_AI="true"; fi
+            if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "vivia-maps" ]; then RUN_VIVIA_MAPS="true"; fi
             if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "vivia-web" ]; then RUN_VIVIA_WEB="true"; fi
             if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "gateway" ]; then RUN_GATEWAY="true"; fi
           fi
@@ -73,6 +76,7 @@ jobs:
           echo "run_infra=$RUN_INFRA"         >> "$GITHUB_OUTPUT"
           echo "run_vivia=$RUN_VIVIA"         >> "$GITHUB_OUTPUT"
           echo "run_vivia_ai=$RUN_VIVIA_AI"   >> "$GITHUB_OUTPUT"
+          echo "run_vivia_maps=$RUN_VIVIA_MAPS" >> "$GITHUB_OUTPUT"
           echo "run_vivia_web=$RUN_VIVIA_WEB" >> "$GITHUB_OUTPUT"
           echo "run_gateway=$RUN_GATEWAY"     >> "$GITHUB_OUTPUT"
 
@@ -80,6 +84,7 @@ jobs:
           echo "- infra: $RUN_INFRA" >> "$GITHUB_STEP_SUMMARY"
           echo "- vivia: $RUN_VIVIA" >> "$GITHUB_STEP_SUMMARY"
           echo "- vivia-ai: $RUN_VIVIA_AI" >> "$GITHUB_STEP_SUMMARY"
+          echo "- vivia-maps: $RUN_VIVIA_MAPS" >> "$GITHUB_STEP_SUMMARY"
           echo "- vivia-web: $RUN_VIVIA_WEB" >> "$GITHUB_STEP_SUMMARY"
           echo "- gateway: $RUN_GATEWAY" >> "$GITHUB_STEP_SUMMARY"
 
@@ -107,6 +112,15 @@ jobs:
           ref: main
           path: vps/vivia-ai
 
+      - name: Checkout vivia-maps
+        if: steps.resolve.outputs.run_vivia_maps == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/vivia-maps
+          token: ${{ secrets.GH_PAT }}
+          ref: main
+          path: vps/vivia-maps
+
       # ── SSH ──────────────────────────────────────────────────────────────────
       - name: Configurar SSH
         run: |
@@ -131,13 +145,21 @@ jobs:
         run: |
           EXCLUDES=(--exclude='.git/' --exclude='vps/vivia/target/' --exclude='vps/vivia-ai/.venv/' --exclude='vps/vivia-ai/notebooks/' --exclude='**/__pycache__/')
 
-          # vivia/vivia-ai no se checkoutearon: protegerlos en el remoto para
-          # que --delete no borre lo que ya está desplegado ahí.
+          # data/ y glyphs/ de vivia-maps nunca están en git (se descargan una
+          # sola vez en el servidor con download-data.sh: ~180MB de OSM/PMTiles).
+          # Protegidos siempre, se despliegue o no vivia-maps en este run.
+          EXCLUDES+=(--exclude='vivia-maps/data/' --exclude='vivia-maps/api/app/assets/glyphs/')
+
+          # vivia/vivia-ai/vivia-maps no se checkoutearon: protegerlos en el
+          # remoto para que --delete no borre lo que ya está desplegado ahí.
           if [ "${{ steps.resolve.outputs.run_vivia }}" != "true" ]; then
             EXCLUDES+=(--exclude='vivia/')
           fi
           if [ "${{ steps.resolve.outputs.run_vivia_ai }}" != "true" ]; then
             EXCLUDES+=(--exclude='vivia-ai/')
+          fi
+          if [ "${{ steps.resolve.outputs.run_vivia_maps }}" != "true" ]; then
+            EXCLUDES+=(--exclude='vivia-maps/')
           fi
 
           rsync -az --delete "${EXCLUDES[@]}" \
@@ -151,13 +173,14 @@ jobs:
           RUN_INFRA: ${{ steps.resolve.outputs.run_infra }}
           RUN_VIVIA: ${{ steps.resolve.outputs.run_vivia }}
           RUN_VIVIA_AI: ${{ steps.resolve.outputs.run_vivia_ai }}
+          RUN_VIVIA_MAPS: ${{ steps.resolve.outputs.run_vivia_maps }}
           RUN_VIVIA_WEB: ${{ steps.resolve.outputs.run_vivia_web }}
           RUN_GATEWAY: ${{ steps.resolve.outputs.run_gateway }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          envs: RUN_INFRA,RUN_VIVIA,RUN_VIVIA_AI,RUN_VIVIA_WEB,RUN_GATEWAY
+          envs: RUN_INFRA,RUN_VIVIA,RUN_VIVIA_AI,RUN_VIVIA_MAPS,RUN_VIVIA_WEB,RUN_GATEWAY
           script: |
             set -e
 
@@ -254,7 +277,25 @@ jobs:
               docker image prune -f
             fi
 
-            # ── 4. vivia-web (React SPA) ──────────────────────────────────────
+            # ── 4. vivia-maps (geocoding + tiles) ────────────────────────────
+            # data/ (PBF + PMTiles) y api/app/assets/glyphs/ ya deben existir en
+            # el servidor (se descargan una sola vez con scripts/download-data.sh,
+            # nunca vienen del checkout). El volumen de nominatim persiste la
+            # importación entre redeploys, así que este bloque no la repite.
+            if [ "$RUN_VIVIA_MAPS" = "true" ]; then
+              cat > ~/vps/vivia-maps/.env << EOF
+            NOMINATIM_PASSWORD=${{ secrets.NOMINATIM_PASSWORD }}
+            PUBLIC_URL=${{ secrets.MAPS_PUBLIC_URL }}
+            EOF
+
+              cd ~/vps/vivia-maps
+              docker compose down --remove-orphans
+              docker compose build --no-cache
+              docker compose up -d --wait
+              docker image prune -f
+            fi
+
+            # ── 5. vivia-web (React SPA) ──────────────────────────────────────
             if [ "$RUN_VIVIA_WEB" = "true" ]; then
               cat > ~/vps/vivia-web/.env << EOF
             VITE_FIREBASE_API_KEY=${{ secrets.VITE_FIREBASE_API_KEY }}
@@ -274,10 +315,11 @@ jobs:
               docker image prune -f
             fi
 
-            # ── 5. Gateway (nginx + SSL) — AL FINAL ──────────────────────────
-            # NGINX resuelve los upstream (vivia-app, vivia-anomaly-api, vivia-web, ...)
-            # al arrancar; si esos contenedores no existen, falla. Por eso el gateway
-            # se levanta DESPUÉS de que vivia, vivia-ai y vivia-web ya estén arriba.
+            # ── 6. Gateway (nginx + SSL) — AL FINAL ──────────────────────────
+            # NGINX resuelve los upstream (vivia-app, vivia-anomaly-api, vivia-maps-api,
+            # vivia-maps-tiles, vivia-web, ...) al arrancar; si esos contenedores no
+            # existen, falla. Por eso el gateway se levanta DESPUÉS de que los demás
+            # servicios ya estén arriba.
             if [ "$RUN_GATEWAY" = "true" ]; then
               docker stop vivia-nginx 2>/dev/null || true
               docker rm   vivia-nginx 2>/dev/null || true
