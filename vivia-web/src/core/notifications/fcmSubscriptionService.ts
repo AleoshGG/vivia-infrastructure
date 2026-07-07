@@ -23,13 +23,20 @@ export const fcmSubscriptionService = {
    */
   async subscribeAfterLogin(): Promise<void> {
     try {
+      console.info('[FCM] subscribeAfterLogin: iniciando');
       const token = await requestNotificationPermission();
-      if (!token) return;
+      if (!token) {
+        console.warn('[FCM] sin token — no se llama a la API');
+        return;
+      }
 
       this.saveFcmToken(token);
-      await httpClient.post('/admin/fcm/subscribe', { fcmToken: token });
-    } catch {
+      console.info('[FCM] enviando POST /admin/fcm/subscribe');
+      const res = await httpClient.post('/admin/fcm/subscribe', { fcmToken: token });
+      console.info('[FCM] respuesta del backend:', res);
+    } catch (e) {
       // Las notificaciones son opcionales — el fallo no bloquea el login
+      console.error('[FCM] subscribeAfterLogin falló:', e);
     }
   },
 
@@ -40,11 +47,16 @@ export const fcmSubscriptionService = {
   async unsubscribeBeforeLogout(): Promise<void> {
     try {
       const token = this.getFcmToken();
-      if (!token) return;
+      if (!token) {
+        console.warn('[FCM] unsubscribeBeforeLogout: no hay token guardado');
+        return;
+      }
 
+      console.info('[FCM] enviando DELETE /admin/fcm/subscribe');
       await httpClient.delete('/admin/fcm/subscribe', { fcmToken: token });
-    } catch {
+    } catch (e) {
       // Si falla la petición, igual limpiamos el token local
+      console.error('[FCM] unsubscribeBeforeLogout falló:', e);
     } finally {
       this.clearFcmToken();
     }

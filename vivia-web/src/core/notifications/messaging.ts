@@ -18,12 +18,16 @@ function getMessagingInstance(): Messaging | null {
   if (messagingInstance) return messagingInstance;
 
   // FCM no está disponible en Safari sin soporte de SW o en entornos sin window
-  if (typeof window === 'undefined') return null;
+  if (typeof window === 'undefined') {
+    console.warn('[FCM] window no disponible — entorno sin soporte');
+    return null;
+  }
 
   try {
     messagingInstance = getMessaging(firebaseApp);
     return messagingInstance;
-  } catch {
+  } catch (e) {
+    console.error('[FCM] getMessaging falló:', e);
     return null;
   }
 }
@@ -34,20 +38,29 @@ function getMessagingInstance(): Messaging | null {
  */
 export async function requestNotificationPermission(): Promise<string | null> {
   const messaging = getMessagingInstance();
-  if (!messaging) return null;
+  if (!messaging) {
+    console.warn('[FCM] messaging no disponible — se omite el registro');
+    return null;
+  }
 
   const permission = await Notification.requestPermission();
+  console.info('[FCM] permiso de notificaciones:', permission);
   if (permission !== 'granted') return null;
 
   try {
+    const registration = await navigator.serviceWorker.register(
+      '/firebase-messaging-sw.js',
+    );
+    console.info('[FCM] service worker registrado, scope:', registration.scope);
+
     const token = await getToken(messaging, {
       vapidKey: VAPID_KEY,
-      serviceWorkerRegistration: await navigator.serviceWorker.register(
-        '/firebase-messaging-sw.js',
-      ),
+      serviceWorkerRegistration: registration,
     });
+    console.info('[FCM] token obtenido:', token ? `${token.slice(0, 12)}…` : token);
     return token;
-  } catch {
+  } catch (e) {
+    console.error('[FCM] error al obtener el token:', e);
     return null;
   }
 }
