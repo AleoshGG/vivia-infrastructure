@@ -7,7 +7,10 @@ import {
 } from 'firebase/messaging';
 import { firebaseApp } from './firebaseApp';
 
-const VAPID_KEY = import.meta.env.VITE_FIREBASE_VAPID_KEY;
+// Clave pública VAPID (Web Push) — no es un secreto; se hardcodea junto con
+// la config de firebaseApp.ts para no depender de variables de entorno en el build.
+const VAPID_KEY =
+  'BJCNFdcE_1aZqMywIbonTDHRNwJbk1TRdZfCYVX6Xb_210N0AnUG7f9GmSSbwZFkqVoADEKryS3OcmjHjtlO37Q';
 
 let messagingInstance: Messaging | null = null;
 

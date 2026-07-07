@@ -1,13 +1,15 @@
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 
+// Config pública de Firebase — los mismos valores que public/firebase-messaging-sw.js.
+// Hardcodeada (igual que en el SW) para no depender de variables de entorno en el build.
 const firebaseConfig = {
-  apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId:             import.meta.env.VITE_FIREBASE_APP_ID,
-  measurementId:     import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
+  apiKey:            'AIzaSyD27fH_gee-HOlfxJkfRILE2IGR7sIFOyM',
+  authDomain:        'vivia-499723.firebaseapp.com',
+  projectId:         'vivia-499723',
+  storageBucket:     'vivia-499723.firebasestorage.app',
+  messagingSenderId: '289958893223',
+  appId:             '1:289958893223:web:e8f1dd9fc29a2ab7a52d82',
+  measurementId:     'G-T2E68CW99C',
 };
 
 // Evita re-inicializar si ya existe una instancia (HMR en desarrollo)
