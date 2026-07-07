@@ -4,20 +4,93 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      service:
+        description: "Servicio a desplegar"
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - all
+          - infra
+          - vivia
+          - vivia-ai
+          - vivia-web
+          - gateway
 
 jobs:
+  # Detecta qué carpetas de ESTE repo cambiaron cuando el disparador es un push
+  # directo (infra/gateway/vivia-web viven aquí). vivia y vivia-ai llegan
+  # siempre por workflow_dispatch con el input `service`, nunca por push.
+  changes:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    outputs:
+      infra: ${{ steps.filter.outputs.infra }}
+      gateway: ${{ steps.filter.outputs.gateway }}
+      vivia_web: ${{ steps.filter.outputs.vivia_web }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            infra:
+              - 'infra/**'
+            gateway:
+              - 'gateway/**'
+            vivia_web:
+              - 'vivia-web/**'
+
   deploy:
+    needs: changes
+    if: always() && (needs.changes.result == 'success' || needs.changes.result == 'skipped')
     runs-on: ubuntu-latest
     environment: production
 
     steps:
+      - name: Resolver servicios a desplegar
+        id: resolve
+        run: |
+          SERVICE="${{ github.event.inputs.service }}"
+          SERVICE="${SERVICE:-all}"
+
+          if [ "${{ github.event_name }}" = "push" ]; then
+            RUN_INFRA="${{ needs.changes.outputs.infra }}"
+            RUN_GATEWAY="${{ needs.changes.outputs.gateway }}"
+            RUN_VIVIA_WEB="${{ needs.changes.outputs.vivia_web }}"
+            RUN_VIVIA="false"
+            RUN_VIVIA_AI="false"
+          else
+            RUN_INFRA="false"; RUN_VIVIA="false"; RUN_VIVIA_AI="false"; RUN_VIVIA_WEB="false"; RUN_GATEWAY="false"
+            if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "infra" ]; then RUN_INFRA="true"; fi
+            if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "vivia" ]; then RUN_VIVIA="true"; fi
+            if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "vivia-ai" ]; then RUN_VIVIA_AI="true"; fi
+            if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "vivia-web" ]; then RUN_VIVIA_WEB="true"; fi
+            if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "gateway" ]; then RUN_GATEWAY="true"; fi
+          fi
+
+          echo "run_infra=$RUN_INFRA"         >> "$GITHUB_OUTPUT"
+          echo "run_vivia=$RUN_VIVIA"         >> "$GITHUB_OUTPUT"
+          echo "run_vivia_ai=$RUN_VIVIA_AI"   >> "$GITHUB_OUTPUT"
+          echo "run_vivia_web=$RUN_VIVIA_WEB" >> "$GITHUB_OUTPUT"
+          echo "run_gateway=$RUN_GATEWAY"     >> "$GITHUB_OUTPUT"
+
+          echo "### Plan de despliegue" >> "$GITHUB_STEP_SUMMARY"
+          echo "- infra: $RUN_INFRA" >> "$GITHUB_STEP_SUMMARY"
+          echo "- vivia: $RUN_VIVIA" >> "$GITHUB_STEP_SUMMARY"
+          echo "- vivia-ai: $RUN_VIVIA_AI" >> "$GITHUB_STEP_SUMMARY"
+          echo "- vivia-web: $RUN_VIVIA_WEB" >> "$GITHUB_STEP_SUMMARY"
+          echo "- gateway: $RUN_GATEWAY" >> "$GITHUB_STEP_SUMMARY"
+
       # ── Checkouts independientes ─────────────────────────────────────────────
-      - name: Checkout vps (gateway + infra)
+      - name: Checkout vps (gateway + infra + vivia-web)
         uses: actions/checkout@v4
         with:
           path: vps
 
       - name: Checkout vivia
+        if: steps.resolve.outputs.run_vivia == 'true'
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/vivia
@@ -26,6 +99,7 @@ jobs:
           path: vps/vivia
 
       - name: Checkout vivia-ai
+        if: steps.resolve.outputs.run_vivia_ai == 'true'
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/vivia-ai
@@ -55,22 +129,35 @@ jobs:
 
       - name: Sincronizar archivos al servidor
         run: |
-          rsync -az --delete \
-            --exclude='.git/' \
-            --exclude='vps/vivia/target/' \
-            --exclude='vps/vivia-ai/.venv/' \
-            --exclude='vps/vivia-ai/notebooks/' \
-            --exclude='**/__pycache__/' \
+          EXCLUDES=(--exclude='.git/' --exclude='vps/vivia/target/' --exclude='vps/vivia-ai/.venv/' --exclude='vps/vivia-ai/notebooks/' --exclude='**/__pycache__/')
+
+          # vivia/vivia-ai no se checkoutearon: protegerlos en el remoto para
+          # que --delete no borre lo que ya está desplegado ahí.
+          if [ "${{ steps.resolve.outputs.run_vivia }}" != "true" ]; then
+            EXCLUDES+=(--exclude='vivia/')
+          fi
+          if [ "${{ steps.resolve.outputs.run_vivia_ai }}" != "true" ]; then
+            EXCLUDES+=(--exclude='vivia-ai/')
+          fi
+
+          rsync -az --delete "${EXCLUDES[@]}" \
             -e "ssh -i ~/.ssh/deploy_key" \
             vps/ "${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }}:~/vps/"
 
       # ── Deploy ───────────────────────────────────────────────────────────────
       - name: Desplegar servicios
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          RUN_INFRA: ${{ steps.resolve.outputs.run_infra }}
+          RUN_VIVIA: ${{ steps.resolve.outputs.run_vivia }}
+          RUN_VIVIA_AI: ${{ steps.resolve.outputs.run_vivia_ai }}
+          RUN_VIVIA_WEB: ${{ steps.resolve.outputs.run_vivia_web }}
+          RUN_GATEWAY: ${{ steps.resolve.outputs.run_gateway }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          envs: RUN_INFRA,RUN_VIVIA,RUN_VIVIA_AI,RUN_VIVIA_WEB,RUN_GATEWAY
           script: |
             set -e
 
@@ -79,128 +166,141 @@ jobs:
 
             # ── 1. Infraestructura (redis, rabbitmq) ─────────────────────────
             # PostgreSQL ya no vive en Docker: ambas bases son instancias RDS.
-            cat > ~/vps/infra/.env << EOF
-            RABBITMQ_USER=${{ secrets.RABBITMQ_USER }}
-            RABBITMQ_PASSWORD=${{ secrets.RABBITMQ_PASSWORD }}
-            RABBITMQ_VHOST=${{ secrets.RABBITMQ_VHOST }}
-            REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
-            EOF
+            if [ "$RUN_INFRA" = "true" ]; then
+              cat > ~/vps/infra/.env << EOF
+              RABBITMQ_USER=${{ secrets.RABBITMQ_USER }}
+              RABBITMQ_PASSWORD=${{ secrets.RABBITMQ_PASSWORD }}
+              RABBITMQ_VHOST=${{ secrets.RABBITMQ_VHOST }}
+              REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
+              EOF
 
-            cd ~/vps/infra
-            docker compose -f docker-compose.infra.yml up -d
+              cd ~/vps/infra
+              docker compose -f docker-compose.infra.yml up -d
+            fi
 
             # ── 2. vivia (Spring Boot) ───────────────────────────────────────
-            mkdir -p ~/secrets
-            echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > ~/secrets/firebase-adminsdk.json
-            chmod 600 ~/secrets/firebase-adminsdk.json
+            if [ "$RUN_VIVIA" = "true" ]; then
+              mkdir -p ~/secrets
+              echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > ~/secrets/firebase-adminsdk.json
+              chmod 600 ~/secrets/firebase-adminsdk.json
 
-            cat > ~/vps/vivia/.env << EOF
-            DB_HOST=${{ secrets.DB_HOST }}
-            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-            DB_NAME=${{ secrets.DB_NAME }}
-            DB_USER=${{ secrets.DB_USER }}
-            SERVER_PORT=${{ secrets.SERVER_PORT }}
-            GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
-            REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
-            RABBITMQ_USER=${{ secrets.RABBITMQ_USER }}
-            RABBITMQ_PASSWORD=${{ secrets.RABBITMQ_PASSWORD }}
-            JWT_SECRET=${{ secrets.JWT_SECRET }}
-            JWT_EXPIRATION=${{ secrets.JWT_EXPIRATION }}
-            JWT_REFRESH_EXPIRATION=${{ secrets.JWT_REFRESH_EXPIRATION }}
-            INTERNAL_API_KEY=${{ secrets.INTERNAL_API_KEY }}
-            FCM_ENABLED=${{ secrets.FCM_ENABLED }}
-            FIRESTORE_ENABLED=${{ secrets.FIRESTORE_ENABLED }}
-            FIREBASE_KEY_HOST_PATH=$HOME/secrets/firebase-adminsdk.json
-            AWS_REGION=${{ secrets.AWS_REGION }}
-            AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
-            AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
-            AWS_S3_BUCKET=${{ secrets.AWS_S3_BUCKET }}
-            AWS_SNS_REKOGNITION_ROLE_ARN=${{ secrets.AWS_SNS_REKOGNITION_ROLE_ARN }}
-            AWS_REKOGNITION_SNS_TOPIC_ARN=${{ secrets.AWS_REKOGNITION_SNS_TOPIC_ARN }}
-            EOF
+              cat > ~/vps/vivia/.env << EOF
+              DB_HOST=${{ secrets.DB_HOST }}
+              DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+              DB_NAME=${{ secrets.DB_NAME }}
+              DB_USER=${{ secrets.DB_USER }}
+              SERVER_PORT=${{ secrets.SERVER_PORT }}
+              GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+              REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
+              RABBITMQ_USER=${{ secrets.RABBITMQ_USER }}
+              RABBITMQ_PASSWORD=${{ secrets.RABBITMQ_PASSWORD }}
+              JWT_SECRET=${{ secrets.JWT_SECRET }}
+              JWT_EXPIRATION=${{ secrets.JWT_EXPIRATION }}
+              JWT_REFRESH_EXPIRATION=${{ secrets.JWT_REFRESH_EXPIRATION }}
+              INTERNAL_API_KEY=${{ secrets.INTERNAL_API_KEY }}
+              FCM_ENABLED=${{ secrets.FCM_ENABLED }}
+              FIRESTORE_ENABLED=${{ secrets.FIRESTORE_ENABLED }}
+              FIREBASE_KEY_HOST_PATH=$HOME/secrets/firebase-adminsdk.json
+              AWS_REGION=${{ secrets.AWS_REGION }}
+              AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+              AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+              AWS_S3_BUCKET=${{ secrets.AWS_S3_BUCKET }}
+              AWS_SNS_REKOGNITION_ROLE_ARN=${{ secrets.AWS_SNS_REKOGNITION_ROLE_ARN }}
+              AWS_REKOGNITION_SNS_TOPIC_ARN=${{ secrets.AWS_REKOGNITION_SNS_TOPIC_ARN }}
+              EOF
 
-            cd ~/vps/vivia
-            docker compose down --remove-orphans
-            docker compose build --no-cache
-            docker compose up -d --wait
-            docker image prune -f
+              cd ~/vps/vivia
+              docker compose down --remove-orphans
+              docker compose build --no-cache
+              docker compose up -d --wait
+              docker image prune -f
+            fi
 
             # ── 3. vivia-ai (Python AI) ──────────────────────────────────────
-            # Credencial del service account de GCS (artefactos de MLflow).
-            mkdir -p ~/secrets
-            echo '${{ secrets.GCS_SA_JSON }}' > ~/secrets/gcs-vivia.json
-            chmod 600 ~/secrets/gcs-vivia.json
+            if [ "$RUN_VIVIA_AI" = "true" ]; then
+              # Credencial del service account de GCS (artefactos de MLflow).
+              mkdir -p ~/secrets
+              echo '${{ secrets.GCS_SA_JSON }}' > ~/secrets/gcs-vivia.json
+              chmod 600 ~/secrets/gcs-vivia.json
 
-            cat > ~/vps/vivia-ai/.env << EOF
-            RABBITMQ_HOST=vivia-rabbitmq
-            RABBITMQ_PORT=5672
-            RABBITMQ_USER=${{ secrets.RABBITMQ_USER }}
-            RABBITMQ_PASSWORD=${{ secrets.RABBITMQ_PASSWORD }}
-            RABBITMQ_VHOST=${{ secrets.RABBITMQ_VHOST }}
-            INTERNAL_API_KEY=${{ secrets.INTERNAL_API_KEY }}
-            EXTERNAL_SERVICE_URL=http://vivia-app:8080
-            MLFLOW_ARTIFACT_ROOT=${{ secrets.MLFLOW_ARTIFACT_ROOT }}
-            MODELS_REGISTRY_HOST=${{ secrets.MODELS_REGISTRY_HOST }}
-            MLFLOW_TRACKING_URI=http://mlflow:5000
-            POSTGRES_USER=${{ secrets.AI_DB_USER }}
-            POSTGRES_PASSWORD=${{ secrets.AI_DB_PASSWORD }}
-            POSTGRES_DB=${{ secrets.AI_DB_NAME }}
-            DATABASE_URL=postgresql+asyncpg://${{ secrets.AI_DB_USER }}:${{ secrets.AI_DB_PASSWORD }}@${{ secrets.AI_DB_HOST }}:5432/${{ secrets.AI_DB_NAME }}?ssl=require
-            MLFLOW_BACKEND_STORE_URI=postgresql://${{ secrets.AI_DB_USER }}:${{ secrets.AI_DB_PASSWORD }}@${{ secrets.AI_DB_HOST }}:5432/${{ secrets.AI_DB_NAME }}?sslmode=require
-            GCS_CREDENTIALS_HOST=$HOME/secrets/gcs-vivia.json
-            EOF
+              cat > ~/vps/vivia-ai/.env << EOF
+              RABBITMQ_HOST=vivia-rabbitmq
+              RABBITMQ_PORT=5672
+              RABBITMQ_USER=${{ secrets.RABBITMQ_USER }}
+              RABBITMQ_PASSWORD=${{ secrets.RABBITMQ_PASSWORD }}
+              RABBITMQ_VHOST=${{ secrets.RABBITMQ_VHOST }}
+              INTERNAL_API_KEY=${{ secrets.INTERNAL_API_KEY }}
+              EXTERNAL_SERVICE_URL=http://vivia-app:8080
+              MLFLOW_ARTIFACT_ROOT=${{ secrets.MLFLOW_ARTIFACT_ROOT }}
+              MODELS_REGISTRY_HOST=${{ secrets.MODELS_REGISTRY_HOST }}
+              MLFLOW_TRACKING_URI=http://mlflow:5000
+              POSTGRES_USER=${{ secrets.AI_DB_USER }}
+              POSTGRES_PASSWORD=${{ secrets.AI_DB_PASSWORD }}
+              POSTGRES_DB=${{ secrets.AI_DB_NAME }}
+              DATABASE_URL=postgresql+asyncpg://${{ secrets.AI_DB_USER }}:${{ secrets.AI_DB_PASSWORD }}@${{ secrets.AI_DB_HOST }}:5432/${{ secrets.AI_DB_NAME }}?ssl=require
+              MLFLOW_BACKEND_STORE_URI=postgresql://${{ secrets.AI_DB_USER }}:${{ secrets.AI_DB_PASSWORD }}@${{ secrets.AI_DB_HOST }}:5432/${{ secrets.AI_DB_NAME }}?sslmode=require
+              GCS_CREDENTIALS_HOST=$HOME/secrets/gcs-vivia.json
+              EOF
 
-            cd ~/vps/vivia-ai
-            docker compose down --remove-orphans
-            docker compose build --no-cache
+              cd ~/vps/vivia-ai
+              docker compose down --remove-orphans
+              docker compose build --no-cache
 
-            # Arranque escalonado: MLflow primero (la BD ya es RDS, externa),
-            # registramos el modelo (idempotente) y por último levantamos todo.
-            docker compose up -d mlflow
-            docker compose run --rm anomaly-api python -m scripts.register_anomaly_model
-            docker compose up -d
-            docker image prune -f
+              # Arranque escalonado: MLflow primero (la BD ya es RDS, externa),
+              # registramos el modelo (idempotente) y por último levantamos todo.
+              docker compose up -d mlflow
+              docker compose run --rm anomaly-api python -m scripts.register_anomaly_model
+              docker compose up -d
+              docker image prune -f
+            fi
 
             # ── 4. vivia-web (React SPA) ──────────────────────────────────────
-            cat > ~/vps/vivia-web/.env << EOF
-            VITE_FIREBASE_API_KEY=${{ secrets.VITE_FIREBASE_API_KEY }}
-            VITE_FIREBASE_AUTH_DOMAIN=${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
-            VITE_FIREBASE_PROJECT_ID=${{ secrets.VITE_FIREBASE_PROJECT_ID }}
-            VITE_FIREBASE_STORAGE_BUCKET=${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
-            VITE_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
-            VITE_FIREBASE_APP_ID=${{ secrets.VITE_FIREBASE_APP_ID }}
-            VITE_FIREBASE_MEASUREMENT_ID=${{ secrets.VITE_FIREBASE_MEASUREMENT_ID }}
-            VITE_FIREBASE_VAPID_KEY=${{ secrets.VITE_FIREBASE_VAPID_KEY }}
-            EOF
+            if [ "$RUN_VIVIA_WEB" = "true" ]; then
+              cat > ~/vps/vivia-web/.env << EOF
+              VITE_FIREBASE_API_KEY=${{ secrets.VITE_FIREBASE_API_KEY }}
+              VITE_FIREBASE_AUTH_DOMAIN=${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+              VITE_FIREBASE_PROJECT_ID=${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+              VITE_FIREBASE_STORAGE_BUCKET=${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+              VITE_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+              VITE_FIREBASE_APP_ID=${{ secrets.VITE_FIREBASE_APP_ID }}
+              VITE_FIREBASE_MEASUREMENT_ID=${{ secrets.VITE_FIREBASE_MEASUREMENT_ID }}
+              VITE_FIREBASE_VAPID_KEY=${{ secrets.VITE_FIREBASE_VAPID_KEY }}
+              EOF
 
-            cd ~/vps/vivia-web
-            docker compose down --remove-orphans
-            docker compose build --no-cache
-            docker compose up -d --wait
-            docker image prune -f
+              cd ~/vps/vivia-web
+              docker compose down --remove-orphans
+              docker compose build --no-cache
+              docker compose up -d --wait
+              docker image prune -f
+            fi
 
             # ── 5. Gateway (nginx + SSL) — AL FINAL ──────────────────────────
             # NGINX resuelve los upstream (vivia-app, vivia-anomaly-api, vivia-web, ...)
             # al arrancar; si esos contenedores no existen, falla. Por eso el gateway
             # se levanta DESPUÉS de que vivia, vivia-ai y vivia-web ya estén arriba.
-            docker stop vivia-nginx 2>/dev/null || true
-            docker rm   vivia-nginx 2>/dev/null || true
+            if [ "$RUN_GATEWAY" = "true" ]; then
+              docker stop vivia-nginx 2>/dev/null || true
+              docker rm   vivia-nginx 2>/dev/null || true
 
-            docker run --rm \
-              -p 80:80 \
-              -v certbot-etc:/etc/letsencrypt \
-              -v certbot-www:/var/www/certbot \
-              certbot/certbot certonly \
-                --standalone \
-                --keep-until-expiring \
-                --non-interactive \
-                -d vivia.aleosh.online \
-                --email spartanthealexvro@gmail.com \
-                --agree-tos \
-                --no-eff-email
+              docker run --rm \
+                -p 80:80 \
+                -v certbot-etc:/etc/letsencrypt \
+                -v certbot-www:/var/www/certbot \
+                certbot/certbot certonly \
+                  --standalone \
+                  --keep-until-expiring \
+                  --non-interactive \
+                  -d vivia.aleosh.online \
+                  --email spartanthealexvro@gmail.com \
+                  --agree-tos \
+                  --no-eff-email
 
-            cd ~/vps/gateway
-            docker compose -f docker-compose.gateway.yml up -d
+              cd ~/vps/gateway
+              docker compose -f docker-compose.gateway.yml up -d
+            fi
+
+            # nginx cachea las IPs de los upstream al arrancar: si algún servicio
+            # se recreó, hay que avisarle aunque el gateway en sí no haya cambiado.
             docker exec vivia-nginx nginx -s reload 2>/dev/null || true
 
             # ── Verificación ─────────────────────────────────────────────────
