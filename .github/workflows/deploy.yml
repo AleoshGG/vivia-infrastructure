@@ -150,6 +150,10 @@ jobs:
           # Protegidos siempre, se despliegue o no vivia-maps en este run.
           EXCLUDES+=(--exclude='vivia-maps/data/' --exclude='vivia-maps/api/app/assets/glyphs/')
 
+          # WS-vivia se despliega desde su propio repo (workflow independiente);
+          # sin este exclude, --delete borraría lo desplegado en ~/vps/WS-vivia/.
+          EXCLUDES+=(--exclude='WS-vivia/')
+
           # vivia/vivia-ai/vivia-maps no se checkoutearon: protegerlos en el
           # remoto para que --delete no borre lo que ya está desplegado ahí.
           if [ "${{ steps.resolve.outputs.run_vivia }}" != "true" ]; then
