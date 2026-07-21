@@ -1,0 +1,6 @@
+/home/aleosh/Documentos/Ingeniería en Software/9no Cuatrimestre/Integrador/vps/api-gateway/src/main/java/aleosh/online/apigateway/ApiGatewayApplication.java
+/home/aleosh/Documentos/Ingeniería en Software/9no Cuatrimestre/Integrador/vps/api-gateway/src/main/java/aleosh/online/apigateway/ratelimit/UserOrIpKeyResolver.java
+/home/aleosh/Documentos/Ingeniería en Software/9no Cuatrimestre/Integrador/vps/api-gateway/src/main/java/aleosh/online/apigateway/security/AuthenticatedUser.java
+/home/aleosh/Documentos/Ingeniería en Software/9no Cuatrimestre/Integrador/vps/api-gateway/src/main/java/aleosh/online/apigateway/security/GatewayAuthProperties.java
+/home/aleosh/Documentos/Ingeniería en Software/9no Cuatrimestre/Integrador/vps/api-gateway/src/main/java/aleosh/online/apigateway/security/JwtAuthenticationGlobalFilter.java
+/home/aleosh/Documentos/Ingeniería en Software/9no Cuatrimestre/Integrador/vps/api-gateway/src/main/java/aleosh/online/apigateway/security/JwtValidator.java

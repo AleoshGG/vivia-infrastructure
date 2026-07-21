@@ -1,0 +1,184 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+
+  data:
+    redis:
+      host: ${REDIS_HOST:vivia-redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+
+  cloud:
+    gateway:
+      server:
+        webflux:
+          # Sin response-timeout global: las conexiones SSE/WebSocket son de larga
+          # duración. El connect-timeout sí acota el establecimiento de conexión.
+          httpclient:
+            connect-timeout: 5000
+
+          # Se aplican a TODAS las rutas.
+          default-filters:
+            # Rate limiting global (token bucket en Redis). La clave la resuelve
+            # userOrIpKeyResolver: userId si hay token válido, si no la IP.
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_REPLENISH:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_BURST:40}
+                redis-rate-limiter.requestedTokens: 1
+                key-resolver: "#{@userOrIpKeyResolver}"
+            # El backend SSE ya manda su propio Access-Control-Allow-Origin; se
+            # deduplica para no emitir el header dos veces (el navegador rechaza
+            # valores múltiples). Equivale al proxy_hide_header de nginx.
+            - 'DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_FIRST'
+
+          # CORS centralizado (reemplaza los add_header de nginx para SSE/OPTIONS).
+          globalcors:
+            cors-configurations:
+              '[/**]':
+                allowedOriginPatterns:
+                  - "*"
+                allowedMethods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+                allowedHeaders: [Authorization, Accept, Content-Type]
+                allowCredentials: true
+                maxAge: 3600
+
+          # El orden importa: rutas específicas antes del catch-all /api/**.
+          routes:
+            # --- Servicios que RECIBEN el prefijo /api/... completo ---
+            - id: llm
+              uri: http://vivia-llm-local:8003
+              predicates:
+                - Path=/api/llm/**
+
+            - id: anomaly
+              uri: http://vivia-anomaly-api:8001
+              predicates:
+                - Path=/api/anomaly/**
+
+            - id: clustering
+              uri: http://vivia-clustering-batch:8002
+              predicates:
+                - Path=/api/clustering/**
+
+            # --- Mapas: tiles (público, datos estáticos) y API ---
+            # Martin sirve /chiapas/{z}/{x}/{y} sin extensión; se acepta .pbf opcional.
+            - id: maps-tiles
+              uri: http://vivia-maps-tiles:3000
+              predicates:
+                - Path=/api/maps/tiles/**
+              filters:
+                - 'RewritePath=/api/maps/tiles/(?<z>\d+)/(?<x>\d+)/(?<y>\d+)(?:\.pbf)?, /chiapas/$\{z}/$\{x}/$\{y}'
+
+            - id: maps
+              uri: http://vivia-maps-api:8004
+              predicates:
+                - Path=/api/maps/**
+              filters:
+                - 'RewritePath=/api/maps/(?<segment>.*), /$\{segment}'
+
+            # --- Chat: REST y WebSocket ---
+            - id: chat-rest
+              uri: http://vivia-chat:3001
+              predicates:
+                - Path=/api/chat/**
+              filters:
+                - 'RewritePath=/api/chat/(?<segment>.*), /chat/$\{segment}'
+
+            - id: chat-ws
+              uri: ws://vivia-chat:3001
+              predicates:
+                - Path=/ws
+              filters:
+                - RewritePath=/ws, /
+
+            # --- Pagos (Stripe): /payments, /premium y /webhooks al servicio
+            #     FastAPI. StripPrefix=1 deja /payments/**, /premium/**,
+            #     /webhooks/** en el backend (montados en la raíz, sin /api). El
+            #     webhook es público (ver public-paths); el resto exige JWT. ---
+            - id: payments
+              uri: http://vivia-payments:8010
+              predicates:
+                - Path=/api/payments/**,/api/premium/**,/api/webhooks/**
+              filters:
+                - StripPrefix=1
+
+            # --- SSE (streams): mismo destino y rewrite que el catch-all, pero
+            #     declarado aparte para timeout largo. metadata.response-timeout
+            #     en ms; -1 desactiva el timeout para la conexión persistente. ---
+            - id: sse-streams
+              uri: http://vivia-app:8080
+              predicates:
+                - Path=/api/properties/draft/*/status/stream,/api/admin/reports/stream
+              filters:
+                - StripPrefix=1
+              metadata:
+                response-timeout: -1
+
+            # --- Catch-all: resto de /api/** al backend transaccional ---
+            - id: app
+              uri: http://vivia-app:8080
+              predicates:
+                - Path=/api/**
+              filters:
+                - StripPrefix=1
+
+# Autenticación del gateway (modelo allowlist estricta): todo exige JWT válido
+# salvo estas rutas. Los patrones matchean la ruta EXTERNA (/api/...) porque el
+# filtro corre antes del StripPrefix.
+#
+# NOTA: el matching es por ruta, no por método. Vivia abre algunos endpoints solo
+# para POST (registro de lessors/lessees); aquí quedan abiertos para todos los
+# métodos, pero vivia sigue aplicando su propia seguridad por método sobre ellos.
+# Si un servicio auxiliar (maps/llm/anomaly/clustering/chat) debe ser anónimo,
+# agrégalo aquí.
+gateway:
+  auth:
+    public-paths:
+      # Auth
+      - /api/auth/login
+      - /api/auth/login/**
+      - /api/auth/refresh
+      # Registro de usuarios (pre-token)
+      - /api/lessors/**
+      - /api/lessees/**
+      # Catálogo público
+      - /api/properties
+      - /api/properties/types
+      # Tiles de mapa: maplibre los pide sin header de Authorization
+      - /api/maps/tiles/**
+      # Webhook de Stripe: se autentica por firma Stripe-Signature, no por JWT
+      - /api/webhooks/stripe
+      # Documentación / well-known
+      - /api/v3/api-docs/**
+      - /api/api-docs/**
+      - /api/swagger-ui/**
+      - /api/swagger-ui.html
+      - /api/.well-known/**
+    websocket-paths:
+      - /ws
+
+# Actuator: healthcheck del contenedor y de nginx. /actuator/health no está bajo
+# /api, así que el filtro JWT no lo intercepta como ruta protegida.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+# Secreto JWT: DEBE coincidir con el de vivia (misma firma HS256). El default es
+# solo para desarrollo local; en producción se inyecta por variable de entorno.
+jwt:
+  secret: ${JWT_SECRET:UnaClaveSecretaMuyLargaYSeguraParaQueHMACFuncioneCorrectamente123456}
+
+logging:
+  level:
+    org.springframework.cloud.gateway: INFO
+    aleosh.online.apigateway: INFO
