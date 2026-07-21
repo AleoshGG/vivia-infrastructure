@@ -12,6 +12,7 @@ WS-vivia/
 
 # Compilados Java
 vivia/target/
+api-gateway/target/
 
 # Python
 vivia-ai/.venv/
