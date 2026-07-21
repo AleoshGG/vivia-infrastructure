@@ -154,6 +154,11 @@ jobs:
           # sin este exclude, --delete borraría lo desplegado en ~/vps/WS-vivia/.
           EXCLUDES+=(--exclude='WS-vivia/')
 
+          # Payments_services-Vivia también se despliega desde su propio repo
+          # (workflow independiente) a ~/vps/Payments_services-Vivia/; protegerlo
+          # para que --delete no borre lo ya desplegado ahí.
+          EXCLUDES+=(--exclude='Payments_services-Vivia/')
+
           # vivia/vivia-ai/vivia-maps no se checkoutearon: protegerlos en el
           # remoto para que --delete no borre lo que ya está desplegado ahí.
           if [ "${{ steps.resolve.outputs.run_vivia }}" != "true" ]; then
@@ -342,6 +347,18 @@ jobs:
                   --email spartanthealexvro@gmail.com \
                   --agree-tos \
                   --no-eff-email
+
+              # .env.gateway no está en git: se genera aquí desde los secrets.
+              # REDIS_PASSWORD y JWT_SECRET DEBEN coincidir con infra/vivia (misma
+              # instancia de Redis, misma firma HS256). REDIS_HOST/PORT son fijos.
+              # Los RATE_LIMIT_* se omiten a propósito: aplican los defaults del
+              # application.yml (replenish 20, burst 40).
+              cat > ~/vps/gateway/.env.gateway << EOF
+            REDIS_HOST=vivia-redis
+            REDIS_PORT=6379
+            REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            EOF
 
               cd ~/vps/gateway
               docker compose -f docker-compose.gateway.yml up -d

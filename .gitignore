@@ -32,3 +32,4 @@ infra/.env
 
 # Firebase credentials — nunca commitear
 vivia/firebase-adminsdk*.json
+Payments_services-Vivia
