@@ -25,6 +25,7 @@ vivia/.env
 vivia-ai/.env
 vivia-maps/.env
 infra/.env
+gateway/.env.gateway
 
 # IDE
 .idea/

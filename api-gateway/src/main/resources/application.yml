@@ -20,16 +20,10 @@ spring:
           httpclient:
             connect-timeout: 5000
 
-          # Se aplican a TODAS las rutas.
+          # Se aplican a TODAS las rutas. El rate limiter NO va aquí: se declara
+          # por ruta (ver más abajo) porque el tráfico anónimo del basemap y de
+          # los webhooks internos son ráfagas legítimas que topaban el bucket.
           default-filters:
-            # Rate limiting global (token bucket en Redis). La clave la resuelve
-            # userOrIpKeyResolver: userId si hay token válido, si no la IP.
-            - name: RequestRateLimiter
-              args:
-                redis-rate-limiter.replenishRate: ${RATE_LIMIT_REPLENISH:20}
-                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_BURST:40}
-                redis-rate-limiter.requestedTokens: 1
-                key-resolver: "#{@userOrIpKeyResolver}"
             # El backend SSE ya manda su propio Access-Control-Allow-Origin; se
             # deduplica para no emitir el header dos veces (el navegador rechaza
             # valores múltiples). Equivale al proxy_hide_header de nginx.
@@ -47,12 +41,25 @@ spring:
                 maxAge: 3600
 
           # El orden importa: rutas específicas antes del catch-all /api/**.
+          #
+          # Rate limiting (token bucket en Redis, clave = userId o IP vía
+          # userOrIpKeyResolver): se aplica solo al tráfico de usuario. Quedan
+          # FUERA a propósito las rutas de mapas (una carga de basemap dispara
+          # decenas de tiles y glyphs anónimos de golpe), los webhooks internos
+          # (ráfagas de S3/SNS) y anomaly/clustering (uso interno con API key).
           routes:
             # --- Servicios que RECIBEN el prefijo /api/... completo ---
             - id: llm
               uri: http://vivia-llm-local:8003
               predicates:
                 - Path=/api/llm/**
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: ${RATE_LIMIT_REPLENISH:20}
+                    redis-rate-limiter.burstCapacity: ${RATE_LIMIT_BURST:40}
+                    redis-rate-limiter.requestedTokens: 1
+                    key-resolver: "#{@userOrIpKeyResolver}"
 
             - id: anomaly
               uri: http://vivia-anomaly-api:8001
@@ -87,6 +94,12 @@ spring:
                 - Path=/api/chat/**
               filters:
                 - 'RewritePath=/api/chat/(?<segment>.*), /chat/$\{segment}'
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: ${RATE_LIMIT_REPLENISH:20}
+                    redis-rate-limiter.burstCapacity: ${RATE_LIMIT_BURST:40}
+                    redis-rate-limiter.requestedTokens: 1
+                    key-resolver: "#{@userOrIpKeyResolver}"
 
             - id: chat-ws
               uri: ws://vivia-chat:3001
@@ -105,6 +118,24 @@ spring:
                 - Path=/api/payments/**,/api/premium/**,/api/webhooks/**
               filters:
                 - StripPrefix=1
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: ${RATE_LIMIT_REPLENISH:20}
+                    redis-rate-limiter.burstCapacity: ${RATE_LIMIT_BURST:40}
+                    redis-rate-limiter.requestedTokens: 1
+                    key-resolver: "#{@userOrIpKeyResolver}"
+
+            # --- Webhooks internos (Lambdas de AWS y servicios de validación):
+            #     mismo destino y StripPrefix que el catch-all, declarado aparte
+            #     para quedar fuera del rate limiter — los picos de S3/SNS son
+            #     ráfagas legítimas y anónimas. Se autentican con
+            #     X-Internal-Api-Key, que vivia valida (ver public-paths). ---
+            - id: internal-webhooks
+              uri: http://vivia-app:8080
+              predicates:
+                - Path=/api/internal/**
+              filters:
+                - StripPrefix=1
 
             # --- SSE (streams): mismo destino y rewrite que el catch-all, pero
             #     declarado aparte para timeout largo. metadata.response-timeout
@@ -115,6 +146,12 @@ spring:
                 - Path=/api/properties/draft/*/status/stream,/api/admin/reports/stream
               filters:
                 - StripPrefix=1
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: ${RATE_LIMIT_REPLENISH:20}
+                    redis-rate-limiter.burstCapacity: ${RATE_LIMIT_BURST:40}
+                    redis-rate-limiter.requestedTokens: 1
+                    key-resolver: "#{@userOrIpKeyResolver}"
               metadata:
                 response-timeout: -1
 
@@ -125,6 +162,12 @@ spring:
                 - Path=/api/**
               filters:
                 - StripPrefix=1
+                - name: RequestRateLimiter
+                  args:
+                    redis-rate-limiter.replenishRate: ${RATE_LIMIT_REPLENISH:20}
+                    redis-rate-limiter.burstCapacity: ${RATE_LIMIT_BURST:40}
+                    redis-rate-limiter.requestedTokens: 1
+                    key-resolver: "#{@userOrIpKeyResolver}"
 
 # Autenticación del gateway (modelo allowlist estricta): todo exige JWT válido
 # salvo estas rutas. Los patrones matchean la ruta EXTERNA (/api/...) porque el
@@ -148,10 +191,23 @@ gateway:
       # Catálogo público
       - /api/properties
       - /api/properties/types
-      # Tiles de mapa: maplibre los pide sin header de Authorization
-      - /api/maps/tiles/**
       # Webhook de Stripe: se autentica por firma Stripe-Signature, no por JWT
       - /api/webhooks/stripe
+
+      # --- Sin JWT porque el backend usa OTRO mecanismo de autenticación ---
+      # No son rutas abiertas: el candado lo pone el backend y el gateway solo
+      # deja de duplicarlo. Antes del gateway nginx las ruteaba sin tocarlas;
+      # exigirles JWT aquí las rompía con un 401 que nunca llegaba al servicio.
+      #
+      # Webhooks internos (Lambdas de AWS y servicios de validación): vivia los
+      # expone como permitAll y los valida con X-Internal-Api-Key.
+      - /api/internal/**
+      # Mapas: API pública de solo lectura, sin auth propia. MapLibre pide
+      # style.json, glyphs y tiles sin header Authorization.
+      - /api/maps/**
+      # Servicios de IA: protegidos con X-Internal-API-Key en vivia-ai.
+      - /api/anomaly/**
+      - /api/clustering/**
       # Documentación / well-known
       - /api/v3/api-docs/**
       - /api/api-docs/**

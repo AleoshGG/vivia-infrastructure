@@ -38,8 +38,12 @@ jobs:
           filters: |
             infra:
               - 'infra/**'
+            # api-gateway/ es el proyecto Spring del gateway; su application.yml
+            # va horneado en el jar, así que un cambio ahí también obliga a
+            # redesplegar (y reconstruir) el contenedor api-gateway.
             gateway:
               - 'gateway/**'
+              - 'api-gateway/**'
             vivia_web:
               - 'vivia-web/**'
 
@@ -153,6 +157,12 @@ jobs:
           # WS-vivia se despliega desde su propio repo (workflow independiente);
           # sin este exclude, --delete borraría lo desplegado en ~/vps/WS-vivia/.
           EXCLUDES+=(--exclude='WS-vivia/')
+
+          # .env.gateway no está en git: se genera en el servidor desde los
+          # secrets, y solo en los runs que despliegan el gateway. Sin este
+          # exclude, --delete lo borraría en los demás runs y compose fallaría
+          # al recrear el contenedor por env_file inexistente.
+          EXCLUDES+=(--exclude='gateway/.env.gateway')
 
           # Payments_services-Vivia también se despliega desde su propio repo
           # (workflow independiente) a ~/vps/Payments_services-Vivia/; protegerlo
@@ -362,7 +372,11 @@ jobs:
             EOF
 
               cd ~/vps/gateway
-              docker compose -f docker-compose.gateway.yml up -d
+              # --build obligatorio: application.yml va horneado en el jar del
+              # api-gateway, así que sin reconstruir la imagen los cambios de
+              # rutas o de allowlist nunca llegan a producción.
+              docker compose -f docker-compose.gateway.yml up -d --build
+              docker image prune -f
             fi
 
             # nginx cachea las IPs de los upstream al arrancar: si algún servicio
